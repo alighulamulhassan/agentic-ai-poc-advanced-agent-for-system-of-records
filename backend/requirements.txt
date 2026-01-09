@@ -1,0 +1,50 @@
+# Core Framework
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.6
+websockets>=12.0
+pydantic-settings>=2.1.0
+
+# LLM - Local with Ollama
+ollama>=0.4.0
+langchain>=0.3.0
+langchain-ollama>=0.2.0
+langchain-community>=0.3.0
+langchain-chroma>=0.1.0
+
+# RAG & Embeddings
+chromadb>=0.5.0
+sentence-transformers>=3.0.0
+pypdf>=4.0.0
+python-docx>=1.1.0
+unstructured>=0.12.0
+
+# Voice - Local Whisper
+openai-whisper>=20231117
+sounddevice>=0.4.6
+soundfile>=0.12.1
+numpy>=1.24.0
+scipy>=1.11.0
+
+# Database
+sqlalchemy>=2.0.25
+aiosqlite>=0.19.0
+
+# Utilities
+python-dotenv>=1.0.0
+httpx>=0.26.0
+pydub>=0.25.1
+
+# TTS
+pyttsx3>=2.90
+gTTS>=2.5.0
+
+# Streamlit Frontend
+streamlit>=1.40.0
+streamlit-webrtc>=0.47.0
+audio-recorder-streamlit>=0.0.10
+
+# Development
+pytest>=8.0.0
+black>=24.1.0
+ruff>=0.1.14
