@@ -4,6 +4,29 @@ A **Sierra AI-inspired** conversational AI system with voice support, RAG, and t
 
 Built with **Option A: Lightweight / Learning-Focused Stack** - runs entirely locally!
 
+## 🚀 Quick Start
+
+```bash
+# 1. Install Ollama
+brew install ollama  # macOS
+ollama serve &
+ollama pull llama3.2
+
+# 2. Setup project
+make setup
+# OR: ./run.sh setup
+
+# 3. Start application
+make start
+# OR: ./run.sh start
+```
+
+**Open**: http://localhost:8501 🎉
+
+> **Requirements:** Python 3.11-3.13 (3.12 recommended). If Python 3.14+, see [troubleshooting](#-troubleshooting).
+
+---
+
 ## ✨ Features
 
 | Feature | Description |
@@ -57,60 +80,6 @@ Built with **Option A: Lightweight / Learning-Focused Stack** - runs entirely lo
 
 > **Note**: This is simple REST-based voice (record → upload → process → download).
 > For real-time bidirectional audio, you'd use WebRTC or WebSockets.
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- **Python 3.11+**
-- **Ollama** (for local LLM)
-
-### 1. Install Ollama
-
-```bash
-# macOS
-brew install ollama
-
-# Linux
-curl -fsSL https://ollama.com/install.sh | sh
-
-# Start Ollama
-ollama serve
-```
-
-### 2. Pull a Model
-
-```bash
-ollama pull llama3.2
-# Or for faster responses: ollama pull mistral
-```
-
-### 3. Setup the Project
-
-```bash
-# Make run script executable
-chmod +x run.sh
-
-# Setup (creates venv, installs deps)
-./run.sh setup
-```
-
-### 4. Start the Application
-
-```bash
-./run.sh start
-```
-
-This will:
-- Start the FastAPI backend on http://localhost:8000
-- Start the Streamlit frontend on http://localhost:8501
-- Index sample documents
-- Seed the database with demo data
-
-### 5. Open the App
-
-🌐 **Frontend**: http://localhost:8501
-📚 **API Docs**: http://localhost:8000/docs
 
 ## 📁 Project Structure
 
@@ -207,6 +176,20 @@ The database is seeded with:
 
 ## 🛠️ Commands
 
+**Using Make (recommended):**
+```bash
+make setup      # Install dependencies
+make start      # Start backend + frontend
+make backend    # Start backend only
+make frontend   # Start frontend only
+make index      # Index documents
+make seed       # Seed database
+make test       # Test API endpoints
+make clean      # Clean up
+make pull-model # Pull Llama 3.2 model
+```
+
+**Or using shell script directly:**
 ```bash
 ./run.sh setup      # Install dependencies
 ./run.sh start      # Start backend + frontend
@@ -217,6 +200,8 @@ The database is seeded with:
 ./run.sh test       # Test API endpoints
 ./run.sh clean      # Clean up
 ```
+
+> **Tip:** Use `make` if you have it (standard on macOS/Linux). Otherwise `./run.sh` works everywhere.
 
 ## 🔍 API Endpoints
 
@@ -250,6 +235,65 @@ This POC demonstrates understanding of:
 3. **Voice AI** - STT/TTS integration
 4. **Reliability** - Confirmation flows, error handling
 5. **Production Patterns** - Modular design, logging, configuration
+
+## 🔧 Troubleshooting
+
+### Python Version Issues
+
+**Problem**: `make setup` fails with PyYAML build errors
+
+**Solution**: You're likely using Python 3.14+, which isn't fully supported yet. Install Python 3.12:
+
+```bash
+# macOS
+brew install python@3.12
+
+# Using pyenv
+pyenv install 3.12
+pyenv local 3.12
+
+# Then recreate the virtual environment
+rm -rf backend/venv
+./run.sh setup
+```
+
+### Ollama Connection Issues
+
+**Problem**: "Ollama is not running" error
+
+**Solution**:
+```bash
+# Start Ollama in a separate terminal
+ollama serve
+
+# Verify it's running
+curl http://localhost:11434/api/tags
+```
+
+### Voice Input Issues
+
+**Problem**: Microphone not working
+
+**Solution**: Ensure your browser has microphone permissions enabled and you're using HTTPS or localhost.
+
+### Missing Dependencies
+
+**Problem**: Import errors when starting the app
+
+**Solution**:
+```bash
+# Reinstall dependencies
+cd backend
+source venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+### Detailed Setup Help
+
+For comprehensive setup instructions, Python version management, and additional troubleshooting, see:
+- [SETUP_REQUIREMENTS.md](./SETUP_REQUIREMENTS.md) - Detailed setup guide
+- [CONTRIBUTING.md](./CONTRIBUTING.md) - Development guidelines
 
 ---
 

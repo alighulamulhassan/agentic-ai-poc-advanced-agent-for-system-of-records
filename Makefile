@@ -1,11 +1,10 @@
 # Voice Agent POC - Makefile
-# Option A: Lightweight / Learning-Focused Stack
 
-.PHONY: setup start backend frontend index seed test clean help
+.PHONY: setup start backend frontend index seed test clean help check-ollama pull-model
 
 # Default target
 help:
-	@echo "Voice Agent POC - Commands"
+	@echo "Voice Agent POC - Available Commands"
 	@echo ""
 	@echo "  make setup     - Install dependencies and configure"
 	@echo "  make start     - Start both backend and frontend"
@@ -15,16 +14,16 @@ help:
 	@echo "  make seed      - Seed database with sample data"
 	@echo "  make test      - Test API endpoints"
 	@echo "  make clean     - Clean up generated files"
+	@echo "  make pull-model - Pull Llama 3.2 model"
 	@echo ""
 	@echo "Quick Start:"
 	@echo "  1. make setup"
 	@echo "  2. ollama serve (in another terminal)"
-	@echo "  3. ollama pull llama3.2"
+	@echo "  3. make pull-model"
 	@echo "  4. make start"
 
 # Setup project
 setup:
-	@echo "📦 Setting up Voice Agent POC..."
 	@./run.sh setup
 
 # Start everything
@@ -33,23 +32,19 @@ start:
 
 # Start backend only
 backend:
-	@echo "🐍 Starting backend..."
-	@cd backend && source venv/bin/activate && uvicorn app.main:app --reload --port 8000
+	@./run.sh backend
 
 # Start frontend only
 frontend:
-	@echo "🎨 Starting frontend..."
-	@cd backend && source venv/bin/activate && cd ../frontend && streamlit run app.py --server.port 8501
+	@./run.sh frontend
 
 # Index documents
 index:
-	@echo "📚 Indexing documents..."
-	@curl -X POST http://localhost:8000/api/documents/index | python3 -m json.tool
+	@./run.sh index
 
 # Seed database
 seed:
-	@echo "🌱 Seeding database..."
-	@cd backend && source venv/bin/activate && python -c "from app.db.seed import seed_database; seed_database()"
+	@./run.sh seed
 
 # Test endpoints
 test:
@@ -57,24 +52,14 @@ test:
 
 # Clean up
 clean:
-	@echo "🧹 Cleaning up..."
-	@rm -rf backend/venv
-	@rm -rf data/db/*.db
-	@rm -rf data/chroma
-	@rm -rf __pycache__ */__pycache__ */*/__pycache__
-	@echo "✅ Done!"
+	@./run.sh clean
 
-# Install only backend deps
-install-backend:
-	@echo "📦 Installing backend dependencies..."
-	@cd backend && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
-
-# Check Ollama
+# Check Ollama status
 check-ollama:
 	@echo "🔍 Checking Ollama..."
-	@curl -s http://localhost:11434/api/tags | python3 -m json.tool || echo "Ollama not running. Start with: ollama serve"
+	@curl -s http://localhost:11434/api/tags | python3 -m json.tool || echo "❌ Ollama not running. Start with: ollama serve"
 
 # Pull LLM model
 pull-model:
-	@echo "📥 Pulling Llama 3.2..."
+	@echo "📥 Pulling Llama 3.2 model..."
 	@ollama pull llama3.2

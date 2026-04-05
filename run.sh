@@ -46,14 +46,49 @@ case $ACTION in
     "setup")
         echo -e "\n${BLUE}📦 Setting up the project...${NC}\n"
         
-        # Check Python
-        check_command python3 || exit 1
+        # Check Python and find compatible version
+        PYTHON_CMD=""
+        
+        # Try Python 3.12 first (recommended)
+        if command -v python3.12 &> /dev/null; then
+            PYTHON_VERSION=$(python3.12 --version | cut -d' ' -f2)
+            echo -e "${GREEN}✅ Found Python 3.12 ($PYTHON_VERSION)${NC}"
+            PYTHON_CMD="python3.12"
+        # Try Python 3.11
+        elif command -v python3.11 &> /dev/null; then
+            PYTHON_VERSION=$(python3.11 --version | cut -d' ' -f2)
+            echo -e "${GREEN}✅ Found Python 3.11 ($PYTHON_VERSION)${NC}"
+            PYTHON_CMD="python3.11"
+        # Check default python3 version
+        elif command -v python3 &> /dev/null; then
+            PYTHON_VERSION=$(python3 --version | cut -d' ' -f2 | cut -d'.' -f1,2)
+            MAJOR_MINOR=$(echo $PYTHON_VERSION | sed 's/\.//g')
+            
+            if [ "$MAJOR_MINOR" -ge "311" ] && [ "$MAJOR_MINOR" -le "313" ]; then
+                echo -e "${GREEN}✅ Found Python $PYTHON_VERSION${NC}"
+                PYTHON_CMD="python3"
+            elif [ "$MAJOR_MINOR" -ge "314" ]; then
+                echo -e "${RED}❌ Python 3.14+ detected but not fully compatible with all dependencies${NC}"
+                echo -e "${YELLOW}⚠️  Please install Python 3.11, 3.12, or 3.13:${NC}"
+                echo -e "   ${BLUE}brew install python@3.12${NC}  # macOS"
+                echo -e "   ${BLUE}pyenv install 3.12${NC}       # Using pyenv"
+                exit 1
+            else
+                echo -e "${RED}❌ Python 3.11+ is required (found $PYTHON_VERSION)${NC}"
+                exit 1
+            fi
+        else
+            echo -e "${RED}❌ Python 3 is not installed${NC}"
+            exit 1
+        fi
+        
+        echo -e "${BLUE}Using: $PYTHON_CMD${NC}"
         
         # Create virtual environment
         if [ ! -d "backend/venv" ]; then
             echo -e "\n${BLUE}Creating virtual environment...${NC}"
             cd backend
-            python3 -m venv venv
+            $PYTHON_CMD -m venv venv
             source venv/bin/activate
             pip install --upgrade pip
             pip install -r requirements.txt
