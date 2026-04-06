@@ -1,0 +1,220 @@
+name: Enterprise Agent — CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: enterprise-agent
+  ECS_SERVICE: AgentService
+  ECS_CLUSTER: AgentCluster
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ============================================================
+  # Job 1: Test
+  # ============================================================
+  test:
+    name: Test & Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r backend/requirements.txt
+          pip install bandit safety
+
+      - name: Lint (ruff)
+        run: ruff check backend/app/
+
+      - name: Format check (black)
+        run: black --check backend/app/
+
+      - name: Security scan (bandit — SAST)
+        run: bandit -r backend/app/ -ll -x backend/app/tests/
+
+      - name: Dependency vulnerability scan (safety)
+        run: safety check -r backend/requirements.txt
+        continue-on-error: true  # warn but don't block on known CVEs with mitigations
+
+      - name: Run tests
+        working-directory: backend
+        run: |
+          pytest tests/ -v \
+            --cov=app \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-fail-under=70
+        env:
+          ENVIRONMENT: test
+          DATABASE_URL: sqlite+aiosqlite:///./test.db
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: backend/coverage.xml
+          fail_ci_if_error: false
+
+  # ============================================================
+  # Job 2: Build & Push to ECR (main branch only)
+  # ============================================================
+  build:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.version }}
+      image_uri: ${{ steps.build-push.outputs.image }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+
+      - name: Build and push Docker image
+        id: build-push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan image for vulnerabilities (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:sha-${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+        continue-on-error: true
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+        if: always()
+
+  # ============================================================
+  # Job 3: Deploy CDK (infrastructure + ECS)
+  # ============================================================
+  deploy:
+    name: Deploy to AWS
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up Node.js (for CDK)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install AWS CDK
+        run: npm install -g aws-cdk
+
+      - name: Install CDK Python dependencies
+        run: |
+          pip install aws-cdk-lib constructs
+
+      - name: CDK Diff (preview changes)
+        working-directory: infrastructure/cdk
+        run: cdk diff --all
+        continue-on-error: true
+
+      - name: CDK Deploy — Security Stack
+        working-directory: infrastructure/cdk
+        run: cdk deploy AgentSecurityStack --require-approval never
+
+      - name: CDK Deploy — Data Stack
+        working-directory: infrastructure/cdk
+        run: cdk deploy AgentDataStack --require-approval never
+
+      - name: CDK Deploy — Agent Stack
+        working-directory: infrastructure/cdk
+        run: cdk deploy AgentAppStack --require-approval never
+
+      - name: Update ECS service with new image
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service ${{ env.ECS_SERVICE }} \
+            --force-new-deployment \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Wait for ECS deployment
+        run: |
+          aws ecs wait services-stable \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Smoke test deployed service
+        run: |
+          SERVICE_URL=$(aws cloudformation describe-stacks \
+            --stack-name AgentAppStack \
+            --query "Stacks[0].Outputs[?OutputKey=='ServiceURL'].OutputValue" \
+            --output text)
+          curl -f "${SERVICE_URL}/health" || exit 1
+
+      - name: Notify on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '❌ Deployment failed. Check the Actions log for details.'
+            })

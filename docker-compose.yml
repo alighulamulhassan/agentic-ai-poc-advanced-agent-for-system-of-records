@@ -1,0 +1,173 @@
+# ============================================================
+# Enterprise Agent — Local Development Stack
+# ============================================================
+# Starts everything needed for local development:
+#   - FastAPI agent backend
+#   - Ollama LLM server
+#   - ChromaDB vector store
+#   - PostgreSQL (production-equivalent database)
+#   - Redis (session/state cache)
+#   - Jaeger (distributed tracing UI)
+#   - Prometheus + Grafana (metrics)
+#
+# Usage:
+#   docker compose up          # start all services
+#   docker compose up agent    # start only the agent backend
+#   docker compose logs -f     # follow logs
+# ============================================================
+
+version: "3.9"
+
+services:
+
+  # -----------------------------------------------------------
+  # Agent Backend
+  # -----------------------------------------------------------
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql+asyncpg://agent:agent@postgres:5432/agentdb
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - CHROMA_PERSIST_DIR=/data/chroma
+      - OTLP_ENDPOINT=http://jaeger:4317
+      - METRICS_BACKEND=prometheus
+      - HITL_TRANSPORT=memory
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-change-in-production}
+    volumes:
+      - agent_data:/app/data
+      - ./backend/app:/app/app    # hot reload for development
+    depends_on:
+      - postgres
+      - ollama
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # -----------------------------------------------------------
+  # Ollama — Local LLM server
+  # -----------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+    restart: unless-stopped
+    # Pull model on startup
+    entrypoint: ["/bin/sh", "-c", "ollama serve & sleep 10 && ollama pull llama3.2 && wait"]
+
+  # -----------------------------------------------------------
+  # PostgreSQL — Production-equivalent database
+  # -----------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=agent
+      - POSTGRES_PASSWORD=agent
+      - POSTGRES_DB=agentdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # -----------------------------------------------------------
+  # Redis — Session state & HITL approval cache
+  # -----------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  # -----------------------------------------------------------
+  # Jaeger — Distributed tracing UI (OpenTelemetry compatible)
+  # -----------------------------------------------------------
+  jaeger:
+    image: jaegertracing/all-in-one:1.52
+    ports:
+      - "16686:16686"    # Jaeger UI
+      - "4317:4317"      # OTLP gRPC receiver
+      - "4318:4318"      # OTLP HTTP receiver
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    restart: unless-stopped
+
+  # -----------------------------------------------------------
+  # Prometheus — Metrics collection
+  # -----------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=7d'
+    restart: unless-stopped
+
+  # -----------------------------------------------------------
+  # Grafana — Metrics visualisation
+  # -----------------------------------------------------------
+  grafana:
+    image: grafana/grafana:10.2.0
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infrastructure/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  # -----------------------------------------------------------
+  # Streamlit Frontend
+  # -----------------------------------------------------------
+  frontend:
+    image: python:3.12-slim
+    ports:
+      - "8501:8501"
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+    command: >
+      sh -c "pip install -q streamlit streamlit-webrtc audio-recorder-streamlit &&
+             streamlit run app.py --server.port 8501 --server.address 0.0.0.0"
+    environment:
+      - AGENT_API_URL=http://agent:8000
+    depends_on:
+      - agent
+    restart: unless-stopped
+
+volumes:
+  agent_data:
+  ollama_data:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
