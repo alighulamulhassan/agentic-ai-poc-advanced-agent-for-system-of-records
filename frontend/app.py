@@ -118,7 +118,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Backend URL
-BACKEND_URL = "http://localhost:8000"
+BACKEND_URL = os.environ.get("AGENT_API_URL") or os.environ.get("BACKEND_URL") or "http://localhost:8000"
 
 # Initialize session state
 if "messages" not in st.session_state:
@@ -145,12 +145,14 @@ def send_message(message: str) -> dict:
                 "messages": [{"role": "user", "content": message}],
                 "stream": False
             },
-            timeout=60
+            timeout=300  # CPU inference of llama3.2 across multi-call agent turns can take 60-120s; cold-start adds another ~90s
         )
         response.raise_for_status()
         return response.json()
     except requests.exceptions.ConnectionError:
         return {"error": "Cannot connect to backend. Make sure it's running on port 8000."}
+    except requests.exceptions.Timeout:
+        return {"error": "Agent timed out (>5 min). Backend is up but inference is slow — first request after startup cold-loads the model (~90s). Try again; subsequent turns should be faster."}
     except Exception as e:
         return {"error": str(e)}
 
