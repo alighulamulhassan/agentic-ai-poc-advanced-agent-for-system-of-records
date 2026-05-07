@@ -1,0 +1,15 @@
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#fee2e2','primaryTextColor':'#0f172a','primaryBorderColor':'#dc2626','lineColor':'#475569','fontFamily':'-apple-system, Segoe UI, Inter, sans-serif','fontSize':'15px'}}}%%
+flowchart LR
+    U([user input]):::user
+    S1["<b>1</b> · LLM context<br/><i>injection · PII leak</i>"]:::attack
+    S2["<b>2</b> · Tool call args<br/><i>policy bypass</i>"]:::attack
+    S3["<b>3</b> · Response<br/><i>overpromise · false claims</i>"]:::attack
+    R([response to user]):::user
+    S4["<b>4</b> · Capability scope<br/><i>tool hijacking</i>"]:::structural
+
+    U --> S1 --> S2 --> S3 --> R
+    S4 -. constrains .-> S2
+
+    classDef user fill:#f1f5f9,stroke:#475569,color:#0f172a
+    classDef attack fill:#fee2e2,stroke:#dc2626,color:#7f1d1d
+    classDef structural fill:#dbeafe,stroke:#1e3a8a,color:#1e3a8a

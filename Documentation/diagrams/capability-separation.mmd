@@ -1,0 +1,14 @@
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#dbeafe','primaryTextColor':'#0f172a','primaryBorderColor':'#1e3a8a','lineColor':'#475569','fontFamily':'-apple-system, Segoe UI, Inter, sans-serif','fontSize':'15px'}}}%%
+flowchart LR
+    Sup[<b>Supervisor</b><br/><i>routes by intent</i>]:::supervisor
+
+    Sup -- "read intent" --> QA[<b>Query Agent</b><br/><i>read-only</i>]:::query
+    Sup -- "write intent" --> TA[<b>Transaction Agent</b><br/><i>read + write</i>]:::txn
+
+    QA --> RO["lookup_order<br/>search_documents<br/>get_customer_info"]:::tools
+    TA --> RW["+ process_refund<br/>+ cancel_order<br/>+ apply_discount"]:::tools
+
+    classDef supervisor fill:#1e3a8a,color:#f8fafc,stroke:#0f172a
+    classDef query fill:#dbeafe,stroke:#1e3a8a,color:#1e3a8a
+    classDef txn fill:#fef3c7,stroke:#d97706,color:#7c2d12
+    classDef tools fill:#f8fafc,stroke:#cbd5e1,color:#0f172a
