@@ -1,0 +1,49 @@
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#dbeafe','primaryTextColor':'#0f172a','primaryBorderColor':'#1e3a8a','lineColor':'#475569','fontFamily':'-apple-system, Segoe UI, Inter, sans-serif','fontSize':'15px'}}}%%
+flowchart LR
+    msg([user msg]):::input
+
+    subgraph Inputs[Input guards]
+        direction TB
+        ig[Injection Guard]
+        pii[PII Detector]
+        ci[Constitutional input]
+        ig --> pii --> ci
+    end
+
+    llm[LLM plan]:::llm
+
+    subgraph PreTool[Pre-tool gates]
+        direction TB
+        pol[Policy Engine]
+        risk[Risk Scorer]
+        hitl{score > θ?}
+        pol --> risk --> hitl
+    end
+
+    exec[Tool exec]:::tool
+
+    subgraph PostTool[Post-tool checks]
+        direction TB
+        refl[Reflection]
+        co[Constitutional output]
+        refl --> co
+    end
+
+    log[(Decision Log)]:::log
+    rsp([response]):::output
+
+    msg --> Inputs
+    Inputs --> llm
+    llm --> PreTool
+    hitl -- yes --> human((human))
+    hitl -- no --> exec
+    human --> exec
+    exec --> PostTool
+    PostTool --> rsp
+    PostTool --> log
+
+    classDef input fill:#fef3c7,stroke:#d97706,color:#1c1917
+    classDef llm fill:#1e3a8a,color:#f8fafc,stroke:#0f172a
+    classDef tool fill:#dcfce7,stroke:#16a34a,color:#0f172a
+    classDef output fill:#fef3c7,stroke:#d97706,color:#1c1917
+    classDef log fill:#f1f5f9,stroke:#475569,color:#0f172a
