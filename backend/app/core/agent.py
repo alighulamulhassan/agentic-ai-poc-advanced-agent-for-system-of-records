@@ -24,8 +24,42 @@ from app.config import settings
 from app.core.llm import get_llm
 from app.tools.registry import get_tools, get_tool_schemas
 from app.tools.executor import execute_tool
+from app.observability.langwatch_setup import get_langwatch
 
 logger = logging.getLogger(__name__)
+
+
+def _lw():
+    """Return the langwatch module if remote tracing is enabled, else None."""
+    return get_langwatch()
+
+
+class _NullContext:
+    """No-op context manager used when LangWatch is not installed."""
+
+    def __enter__(self):
+        return None
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+def _lw_span(**kwargs):
+    """Return a LangWatch span context, or a no-op if langwatch missing."""
+    lw = _lw()
+    if lw is None:
+        return _NullContext()
+    return lw.span(**kwargs)
+
+
+def _attach_eval(trace_or_span, **kwargs) -> None:
+    """Best-effort: attach an evaluation result to the current trace/span."""
+    if trace_or_span is None:
+        return
+    try:
+        trace_or_span.add_evaluation(**kwargs)
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"add_evaluation skipped: {e}")
 
 SYSTEM_PROMPT = """You are a helpful, knowledgeable customer support agent for an e-commerce company.
 You are empathetic, professional, and always aim to resolve customer issues efficiently.
@@ -168,9 +202,50 @@ class Agent:
         # Start decision log
         dec_log = self._dlog().start_decision(conv_id, user_message)
 
+        # LangWatch trace for the full pipeline (no-op if langwatch missing)
+        lw = _lw()
+        lw_trace_cm = (
+            lw.trace(
+                name="agent.process_message",
+                type="agent",
+                input=user_message,
+                metadata={
+                    "conversation_id": conv_id,
+                    "decision_id": dec_log.decision_id,
+                    "llm_model": settings.llm_model,
+                },
+            )
+            if lw is not None
+            else _NullContext()
+        )
+
+        with lw_trace_cm as lw_trace:
+            return await self._run_pipeline(
+                user_message, conv_id, dec_log, start, lw_trace
+            )
+
+    async def _run_pipeline(
+        self,
+        user_message: str,
+        conv_id: str,
+        dec_log,
+        start: float,
+        lw_trace,
+    ) -> Dict[str, Any]:
         # ------ Step 1: PII detection on input ------
-        pii_result = self._pii().detect(user_message)
-        dec_log.pii_detected = pii_result.pii_found
+        with _lw_span(name="guardrail.pii_detection", type="guardrail", input=user_message) as pii_span:
+            pii_result = self._pii().detect(user_message)
+            dec_log.pii_detected = pii_result.pii_found
+            _attach_eval(
+                pii_span,
+                name="PII Detection",
+                type="security/pii_detection",
+                is_guardrail=True,
+                status="processed",
+                passed=not pii_result.pii_found,
+                label=pii_result.risk_level,
+                details=pii_result.summary,
+            )
         if pii_result.pii_found:
             logger.info(f"PII detected in input [{pii_result.risk_level}]: {pii_result.summary}")
             user_message_to_llm = pii_result.masked
@@ -178,9 +253,30 @@ class Agent:
             user_message_to_llm = user_message
 
         # ------ Step 2: Injection guard ------
-        injection_result = self._guard().check(user_message)
-        dec_log.injection_detected = not injection_result.is_safe
-        dec_log.injection_risk_score = injection_result.risk_score
+        with _lw_span(name="guardrail.injection_check", type="guardrail", input=user_message) as inj_span:
+            injection_result = self._guard().check(user_message)
+            dec_log.injection_detected = not injection_result.is_safe
+            dec_log.injection_risk_score = injection_result.risk_score
+            _attach_eval(
+                inj_span,
+                name="Prompt Injection Guard",
+                type="security/injection",
+                is_guardrail=True,
+                status="processed",
+                passed=injection_result.is_safe,
+                score=injection_result.risk_score,
+                details=injection_result.reason or "",
+            )
+            _attach_eval(
+                lw_trace,
+                name="Prompt Injection Guard",
+                type="security/injection",
+                is_guardrail=True,
+                status="processed",
+                passed=injection_result.is_safe,
+                score=injection_result.risk_score,
+                details=injection_result.reason or "",
+            )
 
         if injection_result.should_block:
             logger.warning(f"Injection attempt blocked: {injection_result.reason}")
@@ -203,7 +299,18 @@ class Agent:
         messages.extend(self.conversation_history)
         messages.append({"role": "user", "content": user_message_to_llm})
 
-        response = await self.llm.chat(messages, tools=self.tools if self.tools else None)
+        with _lw_span(
+            name="llm.plan",
+            type="llm",
+            model=settings.llm_model,
+            input=user_message_to_llm,
+        ) as llm_span:
+            response = await self.llm.chat(messages, tools=self.tools if self.tools else None)
+            if llm_span is not None:
+                try:
+                    llm_span.update(output=response.get("content") or "")
+                except Exception:  # noqa: BLE001
+                    pass
 
         # ------ Step 4: Handle tool calls ------
         tool_results = []
@@ -226,6 +333,17 @@ class Agent:
             dec_log.reflection_passed = reflection.passed
             tool_calls_to_run = reflection.plan_to_execute
 
+            _attach_eval(
+                lw_trace,
+                name="Reflection Check",
+                type="guardrail/reflection",
+                is_guardrail=True,
+                status="processed",
+                passed=reflection.passed,
+                score=aggregate_risk,
+                details=getattr(reflection, "reasoning", "") or "",
+            )
+
             # Step 4b: Per-tool guardrails + execution
             for tool_call in tool_calls_to_run:
                 tool_name = tool_call.get("name", "")
@@ -233,12 +351,29 @@ class Agent:
                 tool_id = tool_call.get("id", f"call_{tool_name}")
                 call_start = time.time()
 
+                tool_span_cm = _lw_span(
+                    name=f"tool.{tool_name}",
+                    type="tool",
+                    input=tool_args,
+                )
+                tool_span = tool_span_cm.__enter__()
+
                 # Constitutional input check
                 const_result = self._constitutional().check_input(
                     user_message, tool_name, tool_args
                 )
                 dec_log.constitutional_score = min(
                     dec_log.constitutional_score, const_result.overall_score
+                )
+                _attach_eval(
+                    tool_span,
+                    name="Constitutional Input Check",
+                    type="guardrail/constitutional",
+                    is_guardrail=True,
+                    status="processed",
+                    passed=const_result.passed,
+                    score=const_result.overall_score,
+                    details=const_result.summary,
                 )
 
                 # Output validation
@@ -299,6 +434,23 @@ class Agent:
                     policy_action=policy_result.action.value if 'policy_result' in dir() else "allow",
                 ))
 
+                # Close the LangWatch tool span with the result + eval
+                if tool_span is not None:
+                    try:
+                        tool_span.update(output=result)
+                    except Exception:  # noqa: BLE001
+                        pass
+                _attach_eval(
+                    tool_span,
+                    name="Tool Execution",
+                    type="tool/execution",
+                    status="processed",
+                    passed="error" not in str(result).lower(),
+                    score=aggregate_risk,
+                    details=f"tool={tool_name} duration_ms={round(duration_ms, 2)}",
+                )
+                tool_span_cm.__exit__(None, None, None)
+
                 tool_results.append({
                     "role": "tool",
                     "tool_call_id": tool_id,
@@ -313,8 +465,18 @@ class Agent:
                 "tool_calls": tool_calls,
             })
             messages.extend(tool_results)
-            final_response = await self.llm.chat(messages)
-            content = final_response["content"]
+            with _lw_span(
+                name="llm.final_response",
+                type="llm",
+                model=settings.llm_model,
+            ) as final_span:
+                final_response = await self.llm.chat(messages)
+                content = final_response["content"]
+                if final_span is not None:
+                    try:
+                        final_span.update(output=content)
+                    except Exception:  # noqa: BLE001
+                        pass
 
         else:
             content = response["content"]
@@ -323,6 +485,23 @@ class Agent:
         const_out = self._constitutional().check_output(user_message, content)
         if not const_out.passed:
             logger.warning(f"Constitutional output violation: {const_out.summary}")
+        _attach_eval(
+            lw_trace,
+            name="Constitutional Output Check",
+            type="guardrail/constitutional",
+            is_guardrail=True,
+            status="processed",
+            passed=const_out.passed,
+            score=const_out.overall_score,
+            details=const_out.summary,
+        )
+
+        # Stamp the trace output for the dashboard
+        if lw_trace is not None:
+            try:
+                lw_trace.update(output=content)
+            except Exception:  # noqa: BLE001
+                pass
 
         # ------ Step 6: Update conversation history ------
         self.conversation_history.append({"role": "user", "content": user_message})

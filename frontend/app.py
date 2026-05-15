@@ -143,7 +143,8 @@ def send_message(message: str) -> dict:
             f"{BACKEND_URL}/api/chat/completions",
             json={
                 "messages": [{"role": "user", "content": message}],
-                "stream": False
+                "stream": False,
+                "conversation_id": st.session_state.conversation_id,
             },
             timeout=300  # CPU inference of llama3.2 across multi-call agent turns can take 60-120s; cold-start adds another ~90s
         )
@@ -346,13 +347,20 @@ st.markdown("---")
 
 col1, col2 = st.columns([6, 1])
 
+# Use a form so the input only submits on Enter/Send and clears afterward.
+# Without this, every Streamlit rerun re-reads st.session_state.user_input
+# and resends the same message in a loop.
 with col1:
-    user_input = st.text_input(
-        "Message",
-        placeholder="Type your message here...",
-        key="user_input",
-        label_visibility="collapsed"
-    )
+    with st.form(key="chat_form", clear_on_submit=True):
+        form_input = st.text_input(
+            "Message",
+            placeholder="Type your message here...",
+            key="chat_input",
+            label_visibility="collapsed",
+        )
+        submitted = st.form_submit_button("Send")
+
+user_input = form_input if submitted and form_input else ""
 
 with col2:
     if voice_enabled:

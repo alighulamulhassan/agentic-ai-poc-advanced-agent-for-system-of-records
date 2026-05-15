@@ -1,6 +1,6 @@
 # Voice Agent POC - Makefile
 
-.PHONY: setup start backend frontend index seed test clean help check-ollama pull-model
+.PHONY: setup start backend frontend index seed test clean clean-ports restart help check-ollama pull-model
 
 # Default target
 help:
@@ -14,6 +14,8 @@ help:
 	@echo "  make seed      - Seed database with sample data"
 	@echo "  make test      - Test API endpoints"
 	@echo "  make clean     - Clean up generated files"
+	@echo "  make clean-ports - Kill anything listening on 8000/8501"
+	@echo "  make restart   - clean-ports + start"
 	@echo "  make pull-model - Pull Llama 3.2 model"
 	@echo ""
 	@echo "Quick Start:"
@@ -53,6 +55,13 @@ test:
 # Clean up
 clean:
 	@./run.sh clean
+
+# Free the dev ports (backend 8000, frontend 8501)
+clean-ports:
+	@./run.sh clean-ports
+
+# Restart: kill anything on the dev ports, then start fresh
+restart: clean-ports start
 
 # Check Ollama status
 check-ollama:

@@ -127,7 +127,10 @@ EOF
         
     "start")
         echo -e "\n${BLUE}🚀 Starting Voice Agent POC...${NC}\n"
-        
+
+        # Free dev ports first so a stale uvicorn/streamlit can't block startup
+        "$0" clean-ports
+
         # Check Ollama
         if ! check_ollama; then
             echo -e "${YELLOW}Starting Ollama...${NC}"
@@ -164,7 +167,7 @@ EOF
         cd backend
         source venv/bin/activate
         cd ../frontend
-        streamlit run app.py --server.port 8501 &
+        streamlit run app.py --server.port 8501 --server.headless true &
         FRONTEND_PID=$!
         cd ..
         
@@ -193,7 +196,7 @@ EOF
         cd backend
         source venv/bin/activate
         cd ../frontend
-        streamlit run app.py --server.port 8501
+        streamlit run app.py --server.port 8501 --server.headless true
         ;;
         
     "index")
@@ -234,6 +237,27 @@ EOF
         rm -rf data/chroma
         rm -rf __pycache__ */__pycache__ */*/__pycache__
         echo -e "${GREEN}✅ Cleaned up!${NC}"
+        ;;
+
+    "clean-ports")
+        echo -e "\n${BLUE}🧹 Freeing dev ports 8000 (backend) and 8501 (frontend)...${NC}"
+        for PORT in 8000 8501; do
+            PIDS=$(lsof -tiTCP:$PORT -sTCP:LISTEN 2>/dev/null || true)
+            if [ -n "$PIDS" ]; then
+                echo -e "  Port $PORT busy → killing PID(s): $PIDS"
+                kill $PIDS 2>/dev/null || true
+                sleep 1
+                # SIGKILL anything still hanging on
+                PIDS=$(lsof -tiTCP:$PORT -sTCP:LISTEN 2>/dev/null || true)
+                if [ -n "$PIDS" ]; then
+                    echo -e "  Port $PORT still busy → SIGKILL: $PIDS"
+                    kill -9 $PIDS 2>/dev/null || true
+                fi
+            else
+                echo -e "  Port $PORT free"
+            fi
+        done
+        echo -e "${GREEN}✅ Ports cleared${NC}"
         ;;
         
     "help"|*)

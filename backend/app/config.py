@@ -73,6 +73,8 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        # Allow env vars not declared on Settings (e.g. LANGWATCH_*) without erroring
+        extra = "ignore"
 
     @property
     def base_path(self) -> Path:

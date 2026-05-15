@@ -3,13 +3,13 @@ Document chunking strategies for RAG.
 """
 from typing import List, Dict, Any
 from pathlib import Path
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import (
     PyPDFLoader,
     Docx2txtLoader,
     TextLoader,
 )
-from langchain.schema import Document
+from langchain_core.documents import Document
 from app.config import settings
 
 

@@ -6,7 +6,7 @@ from typing import List, Optional
 from pathlib import Path
 import chromadb
 from chromadb.config import Settings as ChromaSettings
-from langchain.schema import Document
+from langchain_core.documents import Document
 from langchain_chroma import Chroma
 
 from app.config import settings

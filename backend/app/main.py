@@ -36,6 +36,18 @@ async def lifespan(app: FastAPI):
     logger.info(f"  LLM: {settings.llm_model} @ {settings.ollama_base_url}")
     logger.info(f"  Environment: {os.getenv('ENVIRONMENT', 'development')}")
 
+    # Load backend/.env into os.environ so LANGWATCH_* (and other untyped vars) are visible
+    try:
+        from dotenv import load_dotenv
+        from pathlib import Path
+        load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+    except ImportError:
+        pass
+
+    # LangWatch tracing/eval init — must run before the agent module is touched
+    from app.observability.langwatch_setup import init_langwatch
+    init_langwatch()
+
     # Init database
     from app.db.database import init_db
     init_db()
