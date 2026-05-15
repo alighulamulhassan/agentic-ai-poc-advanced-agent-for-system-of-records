@@ -1,0 +1,16 @@
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#f1f5f9','primaryTextColor':'#0f172a','primaryBorderColor':'#475569','lineColor':'#475569','fontFamily':'-apple-system, Segoe UI, Inter, sans-serif','fontSize':'15px'}}}%%
+flowchart LR
+    V[Vulnerability<br/>found]:::vuln
+    E[Add to<br/>eval set]:::eval
+    P[Patch<br/>defense]:::patch
+    S[Ship]:::ship
+    L[(Production<br/>decision logs)]:::log
+
+    V --> E --> P --> S --> L
+    L -- "feed back" --> E
+
+    classDef vuln fill:#fee2e2,stroke:#dc2626,color:#7f1d1d
+    classDef eval fill:#dbeafe,stroke:#1e3a8a,color:#1e3a8a
+    classDef patch fill:#dcfce7,stroke:#16a34a,color:#14532d
+    classDef ship fill:#fef3c7,stroke:#d97706,color:#7c2d12
+    classDef log fill:#f1f5f9,stroke:#475569,color:#0f172a

@@ -1,0 +1,5 @@
+{
+  "markdown.marp.themes": [
+    "./Documentation/marp-themes/tall.css"
+  ]
+}
