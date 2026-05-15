@@ -17,9 +17,9 @@ from app.security.injection_guard import InjectionGuard
 from app.security.output_validator import OutputValidator
 
 
-# ============================================================
+# 
 # PII Detector
-# ============================================================
+# ========================================================================================================================
 class TestPIIDetector:
 
     def test_detects_email(self, pii_detector):
